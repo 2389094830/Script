@@ -1,0 +1,504 @@
+-- AUTO-FARMING BOT UI v1.0
+-- Load AFTER core. Ctrl = toggle visibility.
+
+local BOT = _G.BOT
+if not BOT then warn("[UI] Core not loaded!") return end
+local State = BOT.State
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local lp = Players.LocalPlayer
+
+-- ══════════════════════════════════════════
+-- COLORS
+-- ══════════════════════════════════════════
+local P = {
+    bg = Color3.fromRGB(10, 10, 14),
+    panel = Color3.fromRGB(15, 15, 21),
+    tile = Color3.fromRGB(21, 21, 29),
+    card = Color3.fromRGB(26, 26, 36),
+    line = Color3.fromRGB(38, 38, 52),
+    txt = Color3.fromRGB(220, 220, 232),
+    muted = Color3.fromRGB(100, 100, 120),
+    dim = Color3.fromRGB(46, 46, 60),
+    cyan = Color3.fromRGB(0, 195, 255),
+    lime = Color3.fromRGB(65, 245, 125),
+    amber = Color3.fromRGB(255, 175, 20),
+    rose = Color3.fromRGB(255, 55, 95),
+    violet = Color3.fromRGB(150, 70, 255),
+}
+
+-- ══════════════════════════════════════════
+-- WINDOW SETUP
+-- ══════════════════════════════════════════
+if lp.PlayerGui:FindFirstChild("BotUI") then
+    lp.PlayerGui.BotUI:Destroy()
+end
+
+local sg = Instance.new("ScreenGui")
+sg.Name = "BotUI"
+sg.ResetOnSpawn = false
+sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+sg.IgnoreGuiInset = true
+sg.DisplayOrder = 999
+sg.Parent = lp.PlayerGui
+
+local win = Instance.new("Frame", sg)
+win.Name = "Win"
+win.Size = UDim2.fromOffset(450, 400)
+win.Position = UDim2.fromOffset(14, 70)
+win.BackgroundColor3 = P.bg
+win.BorderSizePixel = 0
+win.Active = true
+win.Draggable = true
+win.ClipsDescendants = false
+win.ZIndex = 999
+Instance.new("UICorner", win).CornerRadius = UDim.new(0, 10)
+do local st = Instance.new("UIStroke", win) st.Color = P.line st.Thickness = 1 end
+
+UIS.InputBegan:Connect(function(inp, gpe)
+    if gpe then return end
+    if inp.KeyCode == Enum.KeyCode.LeftControl or inp.KeyCode == Enum.KeyCode.RightControl then
+        win.Visible = not win.Visible
+    end
+end)
+
+-- ══════════════════════════════════════════
+-- WIDGET FACTORY
+-- ══════════════════════════════════════════
+local function makeWidgets(parent)
+    local lo = 0
+    local w = {}
+    
+    function w.section(txt, col)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size = UDim2.new(1, 0, 0, 16)
+        f.BackgroundTransparency = 1
+        f.LayoutOrder = lo
+        local bar = Instance.new("Frame", f)
+        bar.Size = UDim2.fromOffset(2, 9)
+        bar.Position = UDim2.fromOffset(0, 3)
+        bar.BackgroundColor3 = col or P.cyan
+        bar.BorderSizePixel = 0
+        Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
+        local l = Instance.new("TextLabel", f)
+        l.Size = UDim2.new(1, -8, 1, 0)
+        l.Position = UDim2.fromOffset(7, 0)
+        l.BackgroundTransparency = 1
+        l.Text = txt:upper()
+        l.TextColor3 = col or P.cyan
+        l.TextSize = 7
+        l.Font = Enum.Font.GothamBold
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        return f
+    end
+    
+    function w.toggle(label, defaultOn, ac)
+        lo += 1
+        ac = ac or P.cyan
+        local f = Instance.new("Frame", parent)
+        f.Size = UDim2.new(1, 0, 0, 28)
+        f.BackgroundColor3 = P.tile
+        f.BorderSizePixel = 0
+        f.LayoutOrder = lo
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 7)
+        local stroke = Instance.new("UIStroke", f)
+        stroke.Color = defaultOn and ac or P.line
+        stroke.Thickness = 1
+        local nameLbl = Instance.new("TextLabel", f)
+        nameLbl.Size = UDim2.new(1, -52, 1, 0)
+        nameLbl.Position = UDim2.fromOffset(10, 0)
+        nameLbl.BackgroundTransparency = 1
+        nameLbl.Text = label
+        nameLbl.TextColor3 = defaultOn and P.txt or P.muted
+        nameLbl.TextSize = 9
+        nameLbl.Font = Enum.Font.GothamBold
+        nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+        local track = Instance.new("Frame", f)
+        track.Size = UDim2.fromOffset(34, 16)
+        track.Position = UDim2.new(1, -40, 0.5, -8)
+        track.BackgroundColor3 = defaultOn and ac or P.line
+        track.BorderSizePixel = 0
+        Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+        local knob = Instance.new("Frame", track)
+        knob.Size = UDim2.fromOffset(10, 10)
+        knob.Position = defaultOn and UDim2.fromOffset(21, 3) or UDim2.fromOffset(3, 3)
+        knob.BackgroundColor3 = defaultOn and P.bg or P.muted
+        knob.BorderSizePixel = 0
+        Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+        local state = defaultOn
+        local cb = nil
+        local function setState(val)
+            state = val
+            track.BackgroundColor3 = val and ac or P.line
+            knob.Position = val and UDim2.fromOffset(21, 3) or UDim2.fromOffset(3, 3)
+            knob.BackgroundColor3 = val and P.bg or P.muted
+            stroke.Color = val and ac or P.line
+            nameLbl.TextColor3 = val and P.txt or P.muted
+            if cb then cb(val) end
+        end
+        local hit = Instance.new("TextButton", f)
+        hit.Size = UDim2.fromScale(1, 1)
+        hit.BackgroundTransparency = 1
+        hit.Text = ""
+        hit.ZIndex = 13
+        hit.MouseButton1Click:Connect(function() setState(not state) end)
+        return f,
+            function() return state end,
+            function(fn) cb = fn end,
+            function(val) setState(val) end
+    end
+    
+    function w.infoRow(label, val)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size = UDim2.new(1, 0, 0, 20)
+        f.BackgroundColor3 = P.tile
+        f.BorderSizePixel = 0
+        f.LayoutOrder = lo
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 5)
+        local lk = Instance.new("TextLabel", f)
+        lk.Size = UDim2.new(0.58, 0, 1, 0)
+        lk.Position = UDim2.fromOffset(8, 0)
+        lk.BackgroundTransparency = 1
+        lk.Text = label
+        lk.TextColor3 = P.muted
+        lk.TextSize = 8
+        lk.Font = Enum.Font.Gotham
+        lk.TextXAlignment = Enum.TextXAlignment.Left
+        local lv = Instance.new("TextLabel", f)
+        lv.Size = UDim2.new(0.42, -6, 1, 0)
+        lv.Position = UDim2.new(0.58, 0, 0, 0)
+        lv.BackgroundTransparency = 1
+        lv.Text = val or "-"
+        lv.TextColor3 = P.txt
+        lv.TextSize = 8
+        lv.Font = Enum.Font.GothamBold
+        lv.TextXAlignment = Enum.TextXAlignment.Right
+        return f, lk, lv
+    end
+    
+    function w.actionBtn(label, col)
+        lo += 1
+        local ac = col or P.tile
+        local b = Instance.new("TextButton", parent)
+        b.Size = UDim2.new(1, 0, 0, 26)
+        b.BackgroundColor3 = ac
+        b.BackgroundTransparency = 0.78
+        b.BorderSizePixel = 0
+        b.Text = label
+        b.TextColor3 = P.txt
+        b.TextSize = 8
+        b.Font = Enum.Font.GothamBold
+        b.LayoutOrder = lo
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+        do local st = Instance.new("UIStroke", b) st.Color = ac st.Thickness = 1 st.Transparency = 0.55 end
+        return b
+    end
+    
+    function w.gap(h)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size = UDim2.new(1, 0, 0, h or 4)
+        f.BackgroundTransparency = 1
+        f.LayoutOrder = lo
+    end
+    
+    function w.strInput(label, default)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size = UDim2.new(1, 0, 0, 24)
+        f.BackgroundColor3 = P.tile
+        f.BorderSizePixel = 0
+        f.LayoutOrder = lo
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 6)
+        local l = Instance.new("TextLabel", f)
+        l.Size = UDim2.new(0.42, 0, 1, 0)
+        l.Position = UDim2.fromOffset(8, 0)
+        l.BackgroundTransparency = 1
+        l.Text = label
+        l.TextColor3 = P.muted
+        l.TextSize = 8
+        l.Font = Enum.Font.Gotham
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        local box = Instance.new("TextBox", f)
+        box.Size = UDim2.new(0.58, -8, 0.7, 0)
+        box.Position = UDim2.new(0.42, 4, 0.15, 0)
+        box.BackgroundColor3 = P.card
+        box.BorderSizePixel = 0
+        box.Text = tostring(default)
+        box.TextColor3 = P.txt
+        box.TextSize = 8
+        box.Font = Enum.Font.GothamBold
+        box.ClearTextOnFocus = false
+        Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+        return f, box
+    end
+    
+    function w.pill(txt, col)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size = UDim2.new(1, 0, 0, 24)
+        f.BackgroundColor3 = P.tile
+        f.BorderSizePixel = 0
+        f.LayoutOrder = lo
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 6)
+        do local st = Instance.new("UIStroke", f) st.Color = P.line st.Thickness = 1 end
+        local l = Instance.new("TextLabel", f)
+        l.Size = UDim2.new(1, -12, 1, 0)
+        l.Position = UDim2.fromOffset(9, 0)
+        l.BackgroundTransparency = 1
+        l.Text = txt
+        l.TextColor3 = col or P.muted
+        l.TextSize = 9
+        l.Font = Enum.Font.Gotham
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.TextWrapped = true
+        return l
+    end
+    
+    return w
+end
+
+-- ══════════════════════════════════════════
+-- MAIN SCROLL AREA
+-- ══════════════════════════════════════════
+local scroll = Instance.new("ScrollingFrame", win)
+scroll.Size = UDim2.new(1, 0, 1, 0)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 2
+scroll.ScrollBarImageColor3 = P.line
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.CanvasSize = UDim2.fromOffset(0, 0)
+scroll.ZIndex = 10
+
+local content = Instance.new("Frame", scroll)
+content.Size = UDim2.new(1, 0, 0, 0)
+content.AutomaticSize = Enum.AutomaticSize.Y
+content.BackgroundTransparency = 1
+content.ZIndex = 10
+local ll = Instance.new("UIListLayout", content)
+ll.SortOrder = Enum.SortOrder.LayoutOrder
+ll.Padding = UDim.new(0, 4)
+local pp = Instance.new("UIPadding", content)
+pp.PaddingTop = UDim.new(0, 8)
+pp.PaddingBottom = UDim.new(0, 8)
+pp.PaddingLeft = UDim.new(0, 8)
+pp.PaddingRight = UDim.new(0, 8)
+
+local W = makeWidgets(content)
+
+-- ══════════════════════════════════════════
+-- CONSOLE SECTION
+-- ══════════════════════════════════════════
+W.section("Status", P.cyan)
+local statusLbl, statusAcc = nil, nil
+do
+    local f = Instance.new("Frame", content)
+    f.Size = UDim2.new(1, 0, 0, 38)
+    f.BackgroundColor3 = P.tile
+    f.BorderSizePixel = 0
+    f.LayoutOrder = 5
+    Instance.new("UICorner", f).CornerRadius = UDim.new(0, 8)
+    do local st = Instance.new("UIStroke", f) st.Color = P.cyan st.Thickness = 1 st.Transparency = 0.65 end
+    local acc = Instance.new("Frame", f)
+    acc.Size = UDim2.fromOffset(3, 20)
+    acc.Position = UDim2.fromOffset(10, 9)
+    acc.BackgroundColor3 = P.cyan
+    acc.BorderSizePixel = 0
+    Instance.new("UICorner", acc).CornerRadius = UDim.new(1, 0)
+    local l = Instance.new("TextLabel", f)
+    l.Size = UDim2.new(1, -26, 1, 0)
+    l.Position = UDim2.fromOffset(18, 0)
+    l.BackgroundTransparency = 1
+    l.Text = "Idle"
+    l.TextColor3 = P.txt
+    l.TextSize = 10
+    l.Font = Enum.Font.GothamBold
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.TextWrapped = true
+    statusLbl = l
+    statusAcc = acc
+end
+
+W.gap()
+W.section("Hatch Control", P.amber)
+local _, getHatchState, _, forceHatchToggle = W.toggle("Auto Hatch", State.hatchRunning, P.lime)
+
+W.gap()
+W.section("Selected Egg", P.amber)
+local eggLbl = W.pill(State.selectedEggName)
+local savePosBtn = W.actionBtn("[+] Save Current Position", P.amber)
+local _, posBox = W.strInput("Or paste position", "")
+
+W.gap(5)
+W.section("Webhook Alerts", P.rose)
+local _, getWebhookState, setWebhookCb = W.toggle("Enable Webhooks", State.webhookEnabled, P.rose)
+local _, webhookBox = W.strInput("Discord Webhook URL", State.webhookUrl or "")
+
+W.gap(5)
+W.section("Stats", P.muted)
+local _, hatchedLbl = W.infoRow("Total Hatched", "0")
+local _, lastLbl = W.infoRow("Last Pet", "—")
+
+W.gap(5)
+W.section("Debug Log", P.rose)
+W.gap(2)
+local logFrame = Instance.new("Frame", content)
+logFrame.Size = UDim2.new(1, 0, 0, 130)
+logFrame.BackgroundColor3 = P.card
+logFrame.BorderSizePixel = 0
+logFrame.LayoutOrder = 200
+Instance.new("UICorner", logFrame).CornerRadius = UDim.new(0, 6)
+do local st = Instance.new("UIStroke", logFrame) st.Color = P.line st.Thickness = 1 end
+local logScroll = Instance.new("ScrollingFrame", logFrame)
+logScroll.Size = UDim2.new(1, -4, 1, -4)
+logScroll.Position = UDim2.fromOffset(2, 2)
+logScroll.BackgroundTransparency = 1
+logScroll.BorderSizePixel = 0
+logScroll.ScrollBarThickness = 2
+logScroll.ScrollBarImageColor3 = P.line
+logScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+logScroll.CanvasSize = UDim2.fromOffset(0, 0)
+logScroll.ZIndex = 11
+local logLbl = Instance.new("TextLabel", logScroll)
+logLbl.Size = UDim2.new(1, -4, 0, 0)
+logLbl.AutomaticSize = Enum.AutomaticSize.Y
+logLbl.Position = UDim2.fromOffset(4, 2)
+logLbl.BackgroundTransparency = 1
+logLbl.Text = "(log empty)"
+logLbl.TextColor3 = P.muted
+logLbl.TextSize = 7
+logLbl.Font = Enum.Font.Code
+logLbl.TextXAlignment = Enum.TextXAlignment.Left
+logLbl.TextWrapped = true
+logLbl.ZIndex = 11
+
+local btnRow = Instance.new("Frame", content)
+btnRow.Size = UDim2.new(1, 0, 0, 24)
+btnRow.BackgroundTransparency = 1
+btnRow.LayoutOrder = 201
+btnRow.BorderSizePixel = 0
+local copyBtn = Instance.new("TextButton", btnRow)
+copyBtn.Size = UDim2.new(0.48, 0, 1, 0)
+copyBtn.BackgroundColor3 = P.rose
+copyBtn.BackgroundTransparency = 0.78
+copyBtn.BorderSizePixel = 0
+copyBtn.Text = "[>] Copy Log"
+copyBtn.TextColor3 = P.txt
+copyBtn.TextSize = 8
+copyBtn.Font = Enum.Font.GothamBold
+Instance.new("UICorner", copyBtn).CornerRadius = UDim.new(0, 5)
+local clearBtn = Instance.new("TextButton", btnRow)
+clearBtn.Size = UDim2.new(0.48, 0, 1, 0)
+clearBtn.Position = UDim2.new(0.52, 0, 0, 0)
+clearBtn.BackgroundColor3 = P.muted
+clearBtn.BackgroundTransparency = 0.78
+clearBtn.BorderSizePixel = 0
+clearBtn.Text = "[x] Clear"
+clearBtn.TextColor3 = P.txt
+clearBtn.TextSize = 8
+clearBtn.Font = Enum.Font.GothamBold
+Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 5)
+
+copyBtn.MouseButton1Click:Connect(function()
+    pcall(function() setclipboard(BOT.getLog()) end)
+    copyBtn.Text = "[v] Copied!"
+    task.delay(2, function() copyBtn.Text = "[>] Copy Log" end)
+end)
+clearBtn.MouseButton1Click:Connect(function()
+    BOT.clearLog()
+    logLbl.Text = "(log cleared)"
+end)
+
+task.spawn(function()
+    while task.wait(2) do
+        local txt = BOT.getLog()
+        logLbl.Text = (txt ~= "" and txt or "(log empty)")
+        logScroll.CanvasPosition = Vector2.new(0, 0)
+    end
+end)
+
+-- ══════════════════════════════════════════
+-- EVENT HANDLERS
+-- ══════════════════════════════════════════
+savePosBtn.MouseButton1Click:Connect(function()
+    local c = lp.Character
+    if not c then return end
+    local r = c:FindFirstChild("HumanoidRootPart")
+    if not r then return end
+    BOT.savePos(State.selectedEggName, r.Position)
+    savePosBtn.Text = "[v] Saved!"
+    task.delay(2, function() savePosBtn.Text = "[+] Save Current Position" end)
+end)
+
+local _, getHatchBox = W.strInput("Egg Name", State.selectedEggName)
+local changeEggBtn = W.actionBtn("[>] Change Egg", P.amber)
+changeEggBtn.MouseButton1Click:Connect(function()
+    local name = getHatchBox.Text:match("^%s*(.-)%s*$")
+    if name and name ~= "" then
+        BOT.selectEgg(name)
+        eggLbl.Text = name
+        changeEggBtn.Text = "[v] Changed!"
+        task.delay(2, function() changeEggBtn.Text = "[>] Change Egg" end)
+    end
+end)
+
+W.gap()
+forceHatchToggle(State.hatchRunning)
+local function setupHatchToggle()
+    local _, getState, setCb, forceToggle = W.toggle("Auto Hatch", State.hatchRunning, P.lime)
+    setCb(function(on)
+        if on then
+            BOT.startHatch()
+        else
+            BOT.stopHatch()
+        end
+    end)
+    task.spawn(function()
+        while task.wait(0.5) do
+            if getState() ~= State.hatchRunning then
+                forceToggle(State.hatchRunning)
+            end
+        end
+    end)
+end
+
+setWebhookCb(function(on)
+    State.webhookEnabled = on
+end)
+webhookBox.FocusLost:Connect(function()
+    if webhookBox.Text ~= "" then
+        State.webhookUrl = webhookBox.Text
+        BOT.log("UI", "Webhook URL updated")
+    end
+end)
+
+-- ══════════════════════════════════════════
+-- STATUS UPDATE LOOP
+-- ══════════════════════════════════════════
+task.spawn(function()
+    while task.wait(0.5) do
+        statusLbl.Text = State.action
+        
+        if State.hatchRunning then
+            statusLbl.TextColor3 = P.lime
+            statusAcc.BackgroundColor3 = P.lime
+        else
+            statusLbl.TextColor3 = P.muted
+            statusAcc.BackgroundColor3 = P.muted
+        end
+        
+        hatchedLbl.Text = tostring(State.totalHatched)
+        lastLbl.Text = State.lastHatched or "—"
+        
+        if getHatchState() ~= State.hatchRunning then
+            forceHatchToggle(State.hatchRunning)
+        end
+    end
+end)
+
+print("[BOT UI] v1.0 loaded | Ctrl = show/hide")
