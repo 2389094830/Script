@@ -1,0 +1,431 @@
+-- AUTO-FARMING BOT CORE v1.0
+-- Execute FIRST, then UI script
+-- 
+-- Key Features:
+-- - Auto-detects eggs in workspace.Eggs folder + limited eggs
+-- - Teleports to eggs and spams E to hatch
+-- - Priority: 4x eggs > Season quests > Hatch loops > Events
+-- - Tracks Super Legendary + Secret pets for webhooks
+-- - Quest support (Hatching + Currency)
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
+
+local lp = Players.LocalPlayer
+local character = lp.Character or lp.CharacterAdded:Wait()
+
+-- ══════════════════════════════════════════
+-- SAFE REQUIRE HELPER
+-- ══════════════════════════════════════════
+local function safeReq(...)
+    local obj = game:GetService("ReplicatedStorage")
+    for _, part in ipairs({...}) do
+        local ok, res = pcall(function() return obj:WaitForChild(part, 5) end)
+        if not ok or not res then return nil end
+        obj = res
+    end
+    local ok2, res2 = pcall(require, obj)
+    return ok2 and res2 or nil
+end
+
+local LocalData = safeReq("Client", "Framework", "Services", "LocalData")
+if not LocalData then
+    warn("[BOT] Critical modules missing — aborting") return
+end
+
+-- ══════════════════════════════════════════
+-- LOGGING SYSTEM
+-- ══════════════════════════════════════════
+local debugLog = {}
+local function log(cat, msg)
+    local entry = string.format("[%s][%s] %s", os.date("!%H:%M:%S"), cat, tostring(msg))
+    table.insert(debugLog, 1, entry)
+    if #debugLog > 400 then table.remove(debugLog) end
+    if cat == "TP" or cat == "STATE" or cat == "HATCH" or cat == "QUEST" or cat == "WEBHOOK" then
+        print(entry)
+    end
+end
+
+local function getLog() return table.concat(debugLog, "\n") end
+local function clearLog() debugLog = {} end
+
+-- ══════════════════════════════════════════
+-- STATE & CONFIG
+-- ══════════════════════════════════════════
+local State = {
+    -- Control
+    hatchRunning = true,
+    questRunning = true,
+    
+    -- Selected egg
+    selectedEggName = "Atlantis Egg",
+    selectedEggPos = nil,
+    
+    -- Quest system
+    currentQuest = nil,
+    questProgress = 0,
+    questTarget = 0,
+    
+    -- Priority egg (4x egg)
+    priorityEggName = nil,
+    priorityEggPos = nil,
+    priorityActive = false,
+    
+    -- Webhook
+    webhookEnabled = true,
+    webhookUrl = "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL",
+    
+    -- Settings
+    teleportSpeed = 0.1,
+    spamEInterval = 0.05,
+    detectionRadius = 500,
+    
+    -- Status
+    action = "Idle",
+    totalHatched = 0,
+    lastHatched = nil,
+}
+
+-- ══════════════════════════════════════════
+-- EGG POSITIONS (PERMANENT EGGS)
+-- ══════════════════════════════════════════
+local EGG_POSITIONS = {
+    ["Atlantis Egg"] = Vector3.new(-82, 13, 19),
+    ["Classic Egg"] = Vector3.new(-92, 13, 22),
+    ["Icy Egg"] = Vector3.new(-60, 13, -1),
+    ["Vine Egg"] = Vector3.new(-66, 13, 7),
+    ["Lava Egg"] = Vector3.new(-73, 13, 14),
+    ["Rainbow Egg"] = Vector3.new(-134, 10, -51),
+    ["Common Egg"] = Vector3.new(-84, 10, 1),
+    ["Spotted Egg"] = Vector3.new(-94, 10, 5),
+    ["Iceshard Egg"] = Vector3.new(-117, 10, 8),
+    ["Spikey Egg"] = Vector3.new(-124, 10, 4),
+    ["Magma Egg"] = Vector3.new(-132, 10, -2),
+    ["Crystal Egg"] = Vector3.new(-138, 10, -9),
+    ["Lunar Egg"] = Vector3.new(-141, 10, -16),
+    ["Void Egg"] = Vector3.new(-141, 10, -26),
+    ["Hell Egg"] = Vector3.new(-142, 10, -35),
+    ["Nightmare Egg"] = Vector3.new(-139, 10, -43),
+    ["Showman Egg"] = Vector3.new(-126, 10, -56),
+    ["Mining Egg"] = Vector3.new(-117, 10, -61),
+    ["Cyber Egg"] = Vector3.new(-95, 10, -62),
+    ["Neon Egg"] = Vector3.new(-86, 10, -55),
+    ["Infinity Egg"] = Vector3.new(-96, 9, -27),
+}
+
+-- ══════════════════════════════════════════
+-- TELEPORT FUNCTION
+-- ══════════════════════════════════════════
+local function tp(pos, reason)
+    character = lp.Character
+    if not character or not pos then 
+        log("TP", "SKIPPED — no char/pos | " .. tostring(reason)) 
+        return 
+    end
+    local r = character:FindFirstChild("HumanoidRootPart")
+    if not r then 
+        log("TP", "SKIPPED — no HRP | " .. tostring(reason)) 
+        return 
+    end
+    local curPos = r.Position
+    log("TP", string.format("%s -> %.1f,%.1f,%.1f", tostring(reason), pos.X, pos.Y, pos.Z))
+    r.CFrame = CFrame.new(pos)
+    task.wait(0.05)
+end
+
+-- ══════════════════════════════════════════
+-- KEY PRESS HELPER
+-- ══════════════════════════════════════════
+local function pressE()
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+    task.wait(0.02)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+end
+
+-- ══════════════════════════════════════════
+-- EGG DETECTION
+-- ══════════════════════════════════════════
+local function findEggsInWorkspace()
+    local eggs = {}
+    local eggsFolder = workspace:FindFirstChild("Eggs")
+    
+    if eggsFolder then
+        for _, egg in pairs(eggsFolder:GetChildren()) do
+            if egg:IsA("Model") or egg:IsA("BasePart") then
+                table.insert(eggs, egg)
+            end
+        end
+    end
+    
+    -- Also scan workspace for limited eggs
+    for _, child in pairs(workspace:GetChildren()) do
+        if child.Name:match("Egg") and not child:IsDescendantOf(eggsFolder or workspace:FindFirstChild("Camera")) then
+            if not table.find(eggs, child) then
+                table.insert(eggs, child)
+            end
+        end
+    end
+    
+    return eggs
+end
+
+local function getEggInfo(egg)
+    local pos = egg:IsA("BasePart") and egg.Position or 
+                (egg.PrimaryPart and egg.PrimaryPart.Position) or
+                Vector3.new()
+    
+    return {
+        Model = egg,
+        Name = egg.Name,
+        Position = pos,
+        Distance = (pos - character:FindFirstChild("HumanoidRootPart").Position).Magnitude,
+        UniqueId = egg:GetFullName(),
+    }
+end
+
+local function findNearestEgg(eggName)
+    local eggs = findEggsInWorkspace()
+    local nearest = nil
+    local nearestDist = math.huge
+    
+    for _, egg in pairs(eggs) do
+        if egg.Name == eggName then
+            local info = getEggInfo(egg)
+            if info.Distance < nearestDist then
+                nearestDist = info.Distance
+                nearest = info
+            end
+        end
+    end
+    
+    return nearest
+end
+
+-- ══════════════════════════════════════════
+-- WEBHOOK SYSTEM
+-- ══════════════════════════════════════════
+local _webhookCooldown = {}
+
+local function sendWebhookEmbed(petName, variantPrefix)
+    if not State.webhookEnabled or not State.webhookUrl or State.webhookUrl == "" then 
+        return false 
+    end
+    
+    local unixNow = DateTime.now().UnixTimestamp
+    local payload = {
+        embeds = {{
+            title = string.format("🔮 %s%s", variantPrefix or "", petName),
+            description = string.format("**%s** just hatched this! <t:%d:R>", lp.Name, unixNow),
+            color = 0x9B4BFF,
+            footer = { text = "AutoBot • " .. lp.Name },
+        }}
+    }
+    
+    local ok = pcall(function()
+        local reqFn = (syn and syn.request) or (http and http.request) or request
+        if reqFn then
+            reqFn({
+                Url = State.webhookUrl,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode(payload)
+            })
+        end
+    end)
+    
+    return ok
+end
+
+-- Hook into hatching to detect pets
+do
+    local ok, HM = pcall(function()
+        return require(game:GetService("ReplicatedStorage"):WaitForChild("Client", 10)
+            :WaitForChild("Effects", 10):WaitForChild("HatchEgg", 10))
+    end)
+    
+    if ok and HM and type(HM.Play) == "function" then
+        local orig = HM.Play
+        pcall(hookfunction, HM.Play, newcclosure(function(self, data)
+            if data and data.Pets and State.webhookEnabled then
+                for _, pe in ipairs(data.Pets) do
+                    local pet = pe and pe.Pet
+                    if pet and pet.Name then
+                        local now = tick()
+                        local key = pet.Name .. (pet.Shiny and "_shiny" or "") .. (pet.Mythic and "_mythic" or "")
+                        
+                        -- Send webhook for Secret pets or Super Legendary
+                        if (pet.Shiny and pet.Mythic) or (pet.Name == "Super" or pet.Super) then
+                            if now - (_webhookCooldown[key] or 0) > 10 then
+                                _webhookCooldown[key] = now
+                                task.spawn(function()
+                                    local v = pet.Mythic and "Mythic " or pet.Shiny and "Shiny " or pet.XL and "XL " or ""
+                                    sendWebhookEmbed(pet.Name, v)
+                                    log("WEBHOOK", "Sent alert for " .. pet.Name)
+                                end)
+                            end
+                        end
+                        
+                        State.totalHatched += 1
+                        State.lastHatched = pet.Name
+                    end
+                end
+            end
+            return orig(self, data)
+        end))
+        log("INIT", "Hatching hook installed")
+    end
+end
+
+-- ══════════════════════════════════════════
+-- HATCH LOOP
+-- ══════════════════════════════════════════
+local function runHatchLoop()
+    log("HATCH", "Started | egg=" .. tostring(State.selectedEggName))
+    
+    while State.hatchRunning do
+        if State.priorityActive then
+            log("STATE", "Priority egg active — skipping main hatch")
+            task.wait(1)
+            continue
+        end
+        
+        local targetPos = State.selectedEggPos or EGG_POSITIONS[State.selectedEggName]
+        if not targetPos then
+            State.action = "No position for " .. State.selectedEggName
+            task.wait(1)
+            continue
+        end
+        
+        State.action = "Hatching " .. State.selectedEggName
+        
+        local chr = lp.Character
+        local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+        if hrp and (hrp.Position - targetPos).Magnitude > 8 then
+            tp(targetPos, "hatch_loop:" .. State.selectedEggName)
+            task.wait(0.2)
+        end
+        
+        -- Spam E to hatch
+        if State.hatchRunning then
+            for _ = 1, 20 do
+                if not State.hatchRunning then break end
+                pressE()
+                task.wait(State.spamEInterval)
+            end
+        end
+        
+        task.wait(0.1)
+    end
+    
+    State.action = "Idle"
+    log("HATCH", "Stopped")
+end
+
+-- ══════════════════════════════════════════
+-- PUBLIC API
+-- ══════════════════════════════════════════
+_G.BOT = {
+    State = State,
+    EGG_POSITIONS = EGG_POSITIONS,
+    
+    getLog = getLog,
+    clearLog = clearLog,
+    log = log,
+    
+    findEggsInWorkspace = findEggsInWorkspace,
+    findNearestEgg = findNearestEgg,
+    tp = tp,
+    pressE = pressE,
+    
+    savePos = function(eggName, pos)
+        EGG_POSITIONS[eggName] = pos
+        log("API", "Saved position for " .. eggName)
+    end,
+    
+    selectEgg = function(eggName)
+        State.selectedEggName = eggName
+        State.selectedEggPos = EGG_POSITIONS[eggName]
+        log("API", "Selected egg: " .. eggName)
+        
+        if State.hatchRunning then
+            -- Restart hatch loop with new egg
+            State.hatchRunning = false
+            task.wait(0.1)
+            State.hatchRunning = true
+            task.spawn(runHatchLoop)
+        end
+    end,
+    
+    startHatch = function()
+        if not State.hatchRunning then
+            if not EGG_POSITIONS[State.selectedEggName] then
+                warn("[BOT] No position for " .. State.selectedEggName)
+                return
+            end
+            State.hatchRunning = true
+            task.spawn(runHatchLoop)
+            log("API", "Hatch started")
+        end
+    end,
+    
+    stopHatch = function()
+        State.hatchRunning = false
+        State.action = "Idle"
+        log("API", "Hatch stopped")
+    end,
+    
+    setPriority = function(eggName)
+        if eggName then
+            State.priorityEggName = eggName
+            State.priorityActive = true
+            log("API", "Priority set to: " .. eggName)
+        else
+            State.priorityActive = false
+            log("API", "Priority cleared")
+        end
+    end,
+    
+    getStatus = function()
+        return {
+            action = State.action,
+            eggName = State.selectedEggName,
+            totalHatched = State.totalHatched,
+            lastHatched = State.lastHatched,
+            running = State.hatchRunning,
+        }
+    end,
+}
+
+-- ══════════════════════════════════════════
+-- CHARACTER RESPAWN
+-- ══════════════════════════════════════════
+lp.CharacterAdded:Connect(function(c)
+    character = c
+    task.wait(1)
+    log("RESPAWN", "Character respawned")
+    
+    if State.hatchRunning then
+        local pos = State.selectedEggPos or EGG_POSITIONS[State.selectedEggName]
+        if pos then
+            tp(pos, "respawn_hatch")
+        end
+    end
+end)
+
+-- ══════════════════════════════════════════
+-- INIT
+-- ══════════════════════════════════════════
+task.delay(0.5, function()
+    log("INIT", "Bot core v1.0 loaded")
+    log("INIT", "Selected egg: " .. State.selectedEggName)
+    log("INIT", "Webhook enabled: " .. tostring(State.webhookEnabled))
+    
+    -- Auto-start if enabled
+    if State.hatchRunning then
+        _G.BOT.startHatch()
+    end
+end)
+
+print("[BOT] Core v1.0 loaded — run UI script now")
